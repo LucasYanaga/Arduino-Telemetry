@@ -1,26 +1,38 @@
 #include <SoftwareSerial.h>
 #include "LoRa_E220.h"
 #include <Servo.h>
+#include <ArduinoJson.h>
 
 Servo servo;
  
 #define LED1 8 
-#define SERVO_PIN 7
-#define LED_VERDE 11
-#define LED_AMARL 10
-#define LED_VERML 9
+#define INA 9
+#define LED_VERDE 12
+#define LED_AMARL 11
+#define LED_VERML 10
 
-LoRa_E220 e220ttl(4, 5, 6, 2, 3);
+LoRa_E220 e220ttl(5, 3, 6, 2, 3); // Arduino RX <-- e220 TX, Arduino TX --> e220 RX AUX M0 M1
 void printParameters(struct Configuration configuration);
 void printModuleInformation(struct ModuleInformation moduleInformation);
 
 int servoCount = 0;
 
-SoftwareSerial Serial2(12, 13);
+// Cria um buffer de memória para armazenar o JSON lido
+StaticJsonDocument<200> json;
+
+//JSON
+String led = "";
+int motor = 0;
+String sonic = "";
+
+String lastLedState = "off";
+
+int* valoresOBD;
 
 void setup() {
   pinMode(LED1, OUTPUT);
-  servo.attach(SERVO_PIN, 800, 2500);
+  pinMode(INA, OUTPUT);
+  analogWrite(INA, 255);
 
   Serial.begin(9600);
 
@@ -49,7 +61,7 @@ void setup() {
   configuration.CHAN = 23;
   
   configuration.SPED.uartBaudRate = UART_BPS_9600;
-  configuration.SPED.airDataRate = AIR_DATA_RATE_010_24;
+  configuration.SPED.airDataRate = AIR_DATA_RATE_110_384;
   configuration.SPED.uartParity = MODE_00_8N1;
   
   configuration.OPTION.subPacketSetting = SPS_200_00;
@@ -57,9 +69,9 @@ void setup() {
   configuration.OPTION.transmissionPower = POWER_22;
   
   configuration.TRANSMISSION_MODE.enableRSSI = RSSI_ENABLED;
-  configuration.TRANSMISSION_MODE.fixedTransmission = FT_TRANSPARENT_TRANSMISSION;
+  configuration.TRANSMISSION_MODE.fixedTransmission = FT_FIXED_TRANSMISSION;
   configuration.TRANSMISSION_MODE.enableLBT = LBT_DISABLED;
-  configuration.TRANSMISSION_MODE.WORPeriod = WOR_2000_011;
+  configuration.TRANSMISSION_MODE.WORPeriod = WOR_500_000;
 
   configuration.CRYPT.CRYPT_H = 0x01;
 	configuration.CRYPT.CRYPT_L = 0x01;
@@ -94,45 +106,47 @@ void loop() {
       Serial.println(rc.status.getResponseDescription());
     }else{
       // Print the data received
-      Serial.println("Recebendo: " + rc.data);
+      //Serial.println("Recebendo: " + rc.data);
 
       int rssiDbm = toDbm(rc.rssi);
-      Serial.print("Sinal: "); Serial.println(getSignalQuality(rssiDbm) + " | " + rssiDbm + "dBm");
-
       String input = rc.data;
-      if(input == "on") {
-        digitalWrite(LED1, HIGH);  
-      } 
-      if(input == "off") {
-        digitalWrite(LED1, LOW);
-      }
 
-      if(input == "motor"){
-        runServo();
-      }
+      if (input.substring(0, 1) != "{") {
+        split(input, rssiDbm);
+      }else{
+        DeserializationError error = deserializeJson(json, input);
 
-      if(input.toInt() != 0L){
-        runSonicLed(input.toInt());
-      }
+        if(json["id"] == 2){
+          led = json["led"].as<String>();
+          motor = json["motor"].as<int>();
+          sonic = json["sonic"].as<String>();
 
-        Serial.println("");
-        Serial.print("Variable_1:");
-        Serial.print(input.toInt());
-        Serial.print(",");
-        Serial.print("Variable_2:");
-        Serial.println(rssiDbm);
-        Serial.println("-----------------------------");
+          printValues(led, motor, sonic, rssiDbm);
+
+          if(led == "on" && led != lastLedState) {
+            lastLedState = led;
+            digitalWrite(LED1, HIGH);  
+          } 
+          if(led == "off" && led != lastLedState) {
+            lastLedState = led;
+            digitalWrite(LED1, LOW);
+          }
+
+          if(motor >= 0){
+            runMotor(motor);
+          }
+
+          if(sonic.toInt() != 0L){
+            runSonicLed(sonic.toInt());
+          }
+      }
+    }
     }
   }
 }
 
-void runServo(){
-  for (int i = 0; i < 3; i++) {
-    servo.write(5);
-    delay(800);
-    servo.write(175);
-    delay(800);
-  }
+void runMotor(int speed){
+  analogWrite(INA, speed);
 }
 
 void runSonicLed(int value){
@@ -184,6 +198,70 @@ String getSignalQuality(int rssiDbm){
     }else{
       return "SEM CONEXÃO";
     }
+}
+
+void split(String str, int rssiDbm){
+  int StringCount = 0;
+  String value = "";
+  while (str.length() > 0){
+    int index = str.indexOf(',');
+    if (index == -1) {// No space found{
+      value = str;
+      break;
+    }
+    else{
+      value = str.substring(0, index);
+      str = str.substring(index+1);
+    }
+    StringCount++;
+    switch(StringCount - 1){
+      case 0:
+        Serial.print("RPM   | = ");
+        break;
+      case 1:
+        Serial.print("ENG_L | = ");
+        break;
+      case 2:
+        Serial.print("COL_P | = ");
+        break;
+      case 3:
+        Serial.print("VEL   | = ");
+        break;
+      case 4:
+        Serial.print("TPS   | = ");
+        break;
+      case 5:
+        Serial.print("ENG_T | = ");
+        break;      
+    }
+    Serial.println(value);
+  }
+  Serial.print("Sinal: "); Serial.println(getSignalQuality(rssiDbm) + " | " + rssiDbm + "dBm");
+  Serial.println("---------------------------------------");
+}
+
+void printValues(String led, int motor, String sonic, int rssiDbm){
+  Serial.println("LED   | = " + led);
+  Serial.println("MOTOR | = " + String(motor));
+  Serial.println("SONIC | = " + sonic);
+  Serial.print("Sinal: "); Serial.println(getSignalQuality(rssiDbm) + " | " + rssiDbm + "dBm");
+  Serial.println("---------------------------------------");
+}
+
+void printValuesOBD(int rssiDbm){
+  for (int i = 0; i < 7; i++) {
+    Serial.println(valoresOBD[i]);
+  }
+  /*
+  Serial.println("---------------------------------------");
+  Serial.println("RPM       | = " + String(valoresOBD[0]));
+  Serial.println("ENG_LOAD  | = " + String(valoresOBD[1]));
+  Serial.println("FUEL_PRESS| = " + String(valoresOBD[2]));
+  Serial.println("VELOC     | = " + String(valoresOBD[3]));
+  Serial.println("TPS       | = " + String(valoresOBD[4]));
+  Serial.println("ENG_TEMP  | = " + String(valoresOBD[5]));*/
+  Serial.print("Sinal: "); Serial.println(getSignalQuality(rssiDbm) + " | " + rssiDbm + "dBm");
+  Serial.println("---------------------------------------");
 }
 
 void printParameters(struct Configuration configuration) {

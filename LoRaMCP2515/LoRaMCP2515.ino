@@ -1,46 +1,37 @@
-#include <SoftwareSerial.h>
+#include <CAN.h> 
+#include <OBD2.h>
 #include "LoRa_E220.h"
- 
-#define LED_BUTTON_PIN 7
-#define MOT_BUTTON_PIN 8
- 
-LoRa_E220 e220ttl(4, 5, 6, 2, 3);
+#include <ArduinoJson.h>
+#define DESTINATION_ADDL 2
+
+// PIDS
+const int PIDS[] = {
+  CALCULATED_ENGINE_LOAD,
+  ENGINE_RPM,
+  VEHICLE_SPEED,
+  THROTTLE_POSITION,
+  FUEL_AIR_COMMANDED_EQUIVALENCE_RATE 
+};
+
+const int NUM_PIDS = sizeof(PIDS) / sizeof(PIDS[0]);
+
+//LoRa Ebyte E220
+LoRa_E220 e220ttl(7, 8, 6, 10, 9); // TX E220, RX E220, AUX, M0, M1
 void printParameters(struct Configuration configuration);
 void printModuleInformation(struct ModuleInformation moduleInformation);
- 
-//Contador
-int count = 0;
-unsigned long previousMillis = 0UL;
-unsigned long interval = 1000UL;
 
-//LED / BOTÃO
-byte lastButtonState = LOW;
-byte ledState = LOW;
-unsigned long debounceDuration = 50; // millis
-unsigned long lastTimeButtonStateChanged = 0;
-String turnOn = "on";
-String turnOff = "off";
-
-//MOTOR / BOTÃO
-byte lastButtonMotState = LOW;
-unsigned long lastTimeButtonMotStateChanged = 0;
-String motor = "motor";
-
-//SONIC
-const int TRIG_PIN = 9;
-const int ECHO_PIN = 10;
+//JSON
+StaticJsonDocument<200> json;
+const int TAMANHO_PACOTE = 58;
 
 void setup() {
-  pinMode(LED_BUTTON_PIN, INPUT);
-  pinMode(MOT_BUTTON_PIN, INPUT);
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
-
-  digitalWrite(2, LOW);
-  digitalWrite(3, LOW);
-
   Serial.begin(9600);
- 
+  while (!Serial);
+
+  //START Setup LoRa Ebyte E220 -----------------------------------------------------
+  digitalWrite(10, LOW);
+  digitalWrite(9, LOW);
+
   // Startup all pins and UART
   e220ttl.begin();
 
@@ -48,13 +39,13 @@ void setup() {
   c = e220ttl.getConfiguration();
   // It's important get configuration pointer before all other operation
   Configuration configuration = *(Configuration*) c.data;
-  Serial.println(">> Configuração Atual: ");
+  Serial.println("[LoRa]: Configuração Atual: ");
   Serial.println(c.status.getResponseDescription());
   Serial.println(c.status.code);
 
   printParameters(configuration);
   //  ----------------------- DEFAULT TRANSPARENT WITH RSSI -----------------------
-  configuration.ADDL = 0x03;
+  configuration.ADDL = 0x02;
   configuration.ADDH = 0x00;
 
   configuration.CHAN = 23;
@@ -68,19 +59,19 @@ void setup() {
   configuration.OPTION.transmissionPower = POWER_22;
   
   configuration.TRANSMISSION_MODE.enableRSSI = RSSI_ENABLED;
-  configuration.TRANSMISSION_MODE.fixedTransmission = FT_TRANSPARENT_TRANSMISSION;
+  configuration.TRANSMISSION_MODE.fixedTransmission = FT_FIXED_TRANSMISSION;
   configuration.TRANSMISSION_MODE.enableLBT = LBT_DISABLED;
-  configuration.TRANSMISSION_MODE.WORPeriod = WOR_2000_011;
+  configuration.TRANSMISSION_MODE.WORPeriod = WOR_500_000;
 
   configuration.CRYPT.CRYPT_H = 0x01;
 	configuration.CRYPT.CRYPT_L = 0x01;
 
-  Serial.println(">> Setando Configuração: ");
+  Serial.println("[LoRa]: Setando Configuração: ");
   ResponseStatus rs = e220ttl.setConfiguration(configuration, WRITE_CFG_PWR_DWN_SAVE);
   Serial.println(rs.getResponseDescription());
   Serial.println(rs.code);
  
-  Serial.println(">> Configuração Após Setar: ");
+  Serial.println("[LoRa]: Configuração Após Setar: ");
   c = e220ttl.getConfiguration();
   // It's important get configuration pointer before all other operation
   configuration = *(Configuration*) c.data;
@@ -91,72 +82,122 @@ void setup() {
  
   c.close();
 
-  Serial.println(">> Iniciando transmissão de dados");
+  //END Setup LoRa Ebyte E220 ----------------------------------------------------------
+
+  //START Setup MCP2515-----------------------------------------------------------------
+  Serial.println(F("[OBD2]: Key Stats"));
+
+  /*
+  while (true) {
+    Serial.print(F("[OBD2]: Tentando Conexão... "));
+
+    if (!OBD2.begin()) {
+      Serial.println(F("[OBD2]: ERROR!"));
+
+      delay(1000);
+    } else {
+      Serial.println(F("[OBD2]: SUCESSO!"));
+      break;
+    }
+  }
+  */
+
+  Serial.println();
+  //END Setup MCP2515-----------------------------------------------------------------
+
+  json["id"] = "1";
+  
+  Serial.println("[LoRa]: Iniciando transmissão de dados");
 }
- 
+
 void loop() {
-  unsigned long currentMillis = millis();
-
-  if(currentMillis - previousMillis > interval){
-	  pulse();
- 	  previousMillis = currentMillis;
-  }
+  String jsonOut;
   
-  //MOTOR ACTION 
-  if (millis() - lastTimeButtonStateChanged > debounceDuration) {
-      byte buttonState = digitalRead(MOT_BUTTON_PIN);
-      if (buttonState != lastButtonMotState) {
-        lastTimeButtonMotStateChanged = millis();
-        lastButtonMotState = buttonState;
-        if (buttonState == LOW) {
-            Serial.println("Sending: motor");
-            e220ttl.sendMessage(motor);
-        }
-      }
+  int count = 1;
+  for (int i = 0; i < NUM_PIDS; i++) {
+    int pid = PIDS[i];
+    //float pidValue = readPID(pid);
+    float pidValue = i * count + 10;
+    toJson(pidValue, pid);
+    count ++;
   }
 
-  //LED ACTION
-  if (millis() - lastTimeButtonStateChanged > debounceDuration) {
-      byte buttonState = digitalRead(LED_BUTTON_PIN);
-      if (buttonState != lastButtonState) {
-        lastTimeButtonStateChanged = millis();
-        lastButtonState = buttonState;
-        if (buttonState == LOW) {
-          ledState = (ledState == HIGH) ? LOW: HIGH;
-          if(ledState == HIGH){
-            Serial.println("Enviando: On");
-            e220ttl.sendMessage(turnOn);
-          } else {
-            Serial.println("Enviando: Off");
-            e220ttl.sendMessage(turnOff);
-          }
-        }
-      }
+  serializeJson(json, jsonOut);
+  Serial.println("[LoRa]: " + jsonOut);
+  //particionarEEnviarMensagem(jsonOut);
+  ResponseStatus rs = e220ttl.sendFixedMessage(0, 3, 23, jsonOut);
+  Serial.println(rs.getResponseDescription());
+  if(rs.getResponseDescription() != "Success"){
+    Serial.print("[LoRa]: ERROR!");
   }
-  
+
+  delay(1000);
 }
 
-void pulse(){
-  long duration, cm;
+float readPID(int pid) {
+  // read the PID value
+  float pidValue = OBD2.pidRead(pid);
 
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+  if (isnan(pidValue)) {
+    Serial.print("[OBD2]: ERROR -> " + OBD2.pidName(pid));
+  } else {
+    return pidValue;
+  }
 
-  duration = pulseIn(ECHO_PIN, HIGH);
-
-  cm = microsToCm(duration);
-
-  Serial.print("Enviando: ");
-  Serial.print(cm);
-  Serial.println("cm");
-  e220ttl.sendMessage(String(cm) + " ");
+  Serial.println();
 }
 
-long microsToCm(long microsc){
-  return microsc / 29 / 2;
+void toJson(float pidValue, int pid){
+  switch(pid){
+    case CALCULATED_ENGINE_LOAD:
+      json["eng_load"] = pidValue;
+      break;
+    case ENGINE_RPM:
+      json["rpm"] = pidValue;
+      break;
+    case VEHICLE_SPEED: 
+      json["spd"] = pidValue;
+      break;
+    case THROTTLE_POSITION:
+      json["tps"] = pidValue;
+      break;
+    case FUEL_AIR_COMMANDED_EQUIVALENCE_RATE : 
+      json["lambda"] = pidValue;
+      break;
+  }
+}
+
+void particionarEEnviarMensagem(String mensagemJSON){
+  int totalPacotes = (mensagemJSON.length() / (TAMANHO_PACOTE - 10)) + 1; // Ajusta para incluir metadados
+  Serial.println("Total Pacotes: " + String(totalPacotes));
+  for (int i = 0; i < totalPacotes; i++) {
+    String fragmento = mensagemJSON.substring(i * (TAMANHO_PACOTE - 10), (i + 1) * (TAMANHO_PACOTE - 10));
+    // checksum = calcularChecksum(fragmento);
+    char pacote1[58];  // Defina o tamanho conforme necessário
+    //snprintf(pacote1, sizeof(pacote1), "%d/%d:%s#%u", i + 1, totalPacotes, fragmento.c_str(), checksum);
+    snprintf(pacote1, sizeof(pacote1), "%d/%d:%s", i + 1, totalPacotes, fragmento.c_str());
+
+    Serial.print("PACOTE COMPLETO: ");
+    Serial.println(pacote1);
+
+    ResponseStatus rs = e220ttl.sendFixedMessage(0, 3, 23, pacote1);
+    Serial.println(rs.getResponseDescription());
+    if(rs.getResponseDescription() != "Success"){
+      Serial.print("[LoRa]: ERROR!");
+    }
+
+    delay(100); // Atraso para garantir que o receptor possa processar cada pacote
+  }
+
+  Serial.println("----------------------------------------");
+}
+
+byte calcularChecksum(String pacote) {
+  byte checksum = 0;
+  for (int i = 0; i < pacote.length(); i++) {
+    checksum ^= pacote[i]; // XOR de cada caractere para calcular o checksum
+  }
+  return checksum;
 }
 
 void printParameters(struct Configuration configuration) {
