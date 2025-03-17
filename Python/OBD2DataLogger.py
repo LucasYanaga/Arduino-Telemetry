@@ -26,7 +26,7 @@ def classify_rssi(rssi_dbm):
         return "MUITO RUIM", "darkred"
 
 # Configuração da porta serial
-port = "COM4"  # Porta serial do Arduino
+port = "COM5"  # Porta serial do Arduino
 baud = 9600    # Baud rate do Arduino
 ser = serial.Serial(port, baud)
 print(f"Connected to Arduino at Port: {port} and Baud: {baud}")

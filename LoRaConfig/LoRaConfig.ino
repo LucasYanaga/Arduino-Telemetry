@@ -1,69 +1,26 @@
-#include <ELMduino.h>
 #include <SoftwareSerial.h>
 #include "LoRa_E220.h"
-#include <LiquidCrystal_I2C.h>
-
-#define ELM_PORT Serial
-
-LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars and 2 line displa
 
 LoRa_E220 e220ttl(5, 4, 6, 2, 3);
 void printParameters(struct Configuration configuration);
 void printModuleInformation(struct ModuleInformation moduleInformation);
 
-SoftwareSerial BTSerial(10, 9);  // RX e TX do Arduino conectados ao HC-05
-
-ELM327 myELM327;
-
-typedef enum { RPM,
-ENG_LOAD,
-MANIFOLD_PRESS,
-KPH,
-TPS,
-ENGINE_TEMP,
-SEND_MESSAGE} obd_pid_states;
-
 String msg = "";
-
-obd_pid_states obd_state = RPM;
-
 uint32_t rpm = 0;
 uint32_t engineLoad = 0;
 uint32_t manifoldPressure = 0;
 uint32_t kph = 0;
 uint32_t tps = 0;
 uint32_t engineTemp = 0;
-
 bool loraStarted = false;
 
 void setup() {
   Serial.begin(9600);            // Monitor serial
-
-  //Configurando LCD
-  lcd.init();                      
-  lcd.backlight();
-
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Ola, Lucas Hang!");
-
-  delay(2000);
-
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Iniciando");
-  lcd.setCursor(0,1);
-  lcd.print("configuracao dos");
-  lcd.setCursor(0,2);
-  lcd.print("modulos...");
-  
-  Serial.println("Iniciando configuração dos módulos...");
-  delay(2000);
+  Serial.println("Configurando modulo LoRa...");
 
   // Startup all pins and UART
   e220ttl.begin();
-
-  /*
+  
   ResponseStructContainer c;
   c = e220ttl.getConfiguration();
   // It's important get configuration pointer before all other operation
@@ -111,29 +68,11 @@ void setup() {
  
   c.close();
 
-  */
-
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("LoRa: ");
-
-  lcd.setCursor(0,1);
-  lcd.print("HC-05: ");
-
-  lcd.setCursor(0,2);
-  lcd.print("ELM327: ");
+  Serial.println("LoRa OK!");
 
   delay(2000);
 
-  lcd.setCursor(5,0);
-  lcd.print("OK!");
-
-  delay(2000);
-
-  BTSerial.begin(38400);          // Taxa de comunicação do HC-05
-
-  lcd.setCursor(6,1);
-  lcd.print("OK!");
+  Serial.println("Configurando Bluetooth e ELM327...");
 
   /*
   if(!myELM327.begin(BTSerial)) {
@@ -145,23 +84,14 @@ void setup() {
   }
   */
 
-  lcd.setCursor(7,2);
-  lcd.print("OK!");
-
   Serial.println(">> Iniciando tranmissão de dados");
 
   delay(2000);
-
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Mitsubishi Lancer: ");
-  setLayout(); 
 }
 
 void loop() {
-  simulateValues(10);
+  simulateValues(100);
   printValues();
-  printValuesLCD();
   ResponseStatus rs = e220ttl.sendFixedMessage(0, 3, 23, msg);
   
   /*
@@ -277,67 +207,6 @@ void simulateValues(int msgdelay){
   engineTemp = random(60, 200);
   msg += String(engineTemp);
   delay(msgdelay);
-}
-
-void setLayout(){
-  lcd.setCursor(0,1);
-  lcd.print("RPM:");
-  lcd.setCursor(9,1);
-  lcd.print("ENG_L:");
-  lcd.setCursor(19,1);
-  lcd.print("%");
-
-  lcd.setCursor(0,2);
-  lcd.print("VEL:");
-  lcd.setCursor(9,2);
-  lcd.print("COL_P:");
-  lcd.setCursor(19,2);
-  lcd.print("P");
-
-  lcd.setCursor(0,3);
-  lcd.print("TPS:");
-  lcd.setCursor(9,3);
-  lcd.print("ENG_T:");
-  lcd.setCursor(19,3);
-  lcd.print("C");
-}
-
-void printValuesLCD(){
-  lcd.setCursor(4,1);
-  lcd.print("    ");
-  lcd.setCursor(4,1);
-  lcd.print(String(rpm));
-
-  lcd.setCursor(15,1);
-  lcd.print("    ");
-  lcd.setCursor(15,1);
-  lcd.print(String(engineLoad));
-
-  lcd.setCursor(4,2);
-  lcd.print("    ");
-  lcd.setCursor(4,2);
-  lcd.print(String(kph));
-
-  lcd.setCursor(15,2);
-  lcd.print("    ");
-  lcd.setCursor(15,2);
-  lcd.print(String(manifoldPressure));
-
-  lcd.setCursor(4,3);
-  lcd.print("    ");
-  lcd.setCursor(4,3);
-  lcd.print(String(tps));
-
-  lcd.setCursor(15,3);
-  lcd.print("    ");
-  lcd.setCursor(15,3);
-  lcd.print(String(engineTemp));
-}
-
-void setError(int nextAction){
-  msg += "0,";
-  myELM327.printError();
-  obd_state = nextAction;
 }
 
 void printValues(){
