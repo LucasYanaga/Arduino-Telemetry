@@ -1,0 +1,41 @@
+Parear HC-05 com ELM327:
+	1 - Ache o endereço MAC do ELM327. Aperte o botão do módulo BT, disparando o comando AT+INQM, procurando dispositivos por perto,
+		ou tente conectar com um celular android e veja o endereço.
+	2 - Use o script configuração bluetooth para poder enviar comandos AT ao HC-05.
+	3 - Antes de ligar o arduino, fique pressionando o botão do HC-05, para liga-lo no modo AT. A luz vermelha piscara lentamente.
+	4 - Envie esses comandos AT pelo Serial do Arduino IDE:
+		- Meu endereço é: 123:45:6789BA,0,FFD0
+		- Pegue o primeiro trecho e substitua ":" por ","
+		- 
+		
+		AT+RESET
+		AT+ORGL (Set to original)
+		AT+ROLE = 1 (Set to Master)
+		AT+CMODE = 0 (Set connect to a specific address)
+		AT+BIND = 123,45,6789BA (Endereço MAC)
+		AT+INIT (Need to connect)
+		AT+PAIR = 123,45,6789BA,20 (,20 means 20 second timeout)
+		AT+LINK = 123,45,6789BA
+
+Conexões (Dessa forma os cabos irão ficar em ordem e em linha reta):
+	HC-05:
+		STATE 	-> 8
+		RX		-> 9 (3.3v Divisor de Tensão v1 = 150, v2 = 270)
+		TX		-> 10
+		GND		-> GND
+		VCC 	-> 5v
+		EN		-> 11 (3.3v Divisor de Tensão v1 = 150, v2 = 270)
+	LCD:
+		GND	-> GND
+		VCC -> 5v
+		SDA -> A4
+		SCL -> A5
+	LoRa:
+		GND -> GND
+		VCC -> 5v
+		AUX -> 6
+		TX 	-> 5
+		RX	-> 4
+		M1	-> 3
+		M0	-> 2 
+	
