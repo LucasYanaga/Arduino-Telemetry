@@ -1,3 +1,5 @@
+#include <esp32_can.h>
+
 #include <SoftwareSerial.h>
 #include "LoRa_E220.h"
 
@@ -15,7 +17,7 @@ uint32_t engineTemp = 0;
 bool loraStarted = false;
 
 void setup() {
-  Serial.begin(9600);            // Monitor serial
+  Serial.begin(9600);      
   Serial.println("Configurando modulo LoRa...");
 
   // Startup all pins and UART
